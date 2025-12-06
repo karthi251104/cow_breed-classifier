@@ -1,4 +1,4 @@
-# app.py (or main.py)
+# app.py
 import os
 import numpy as np
 from PIL import Image
@@ -6,12 +6,10 @@ import tensorflow as tf
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# =============================
+# ==========================
 # CONFIG
-# =============================
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-MODEL_PATH = "model.tflite"  # ← Make sure this matches your actual filename!
+# ==========================
+MODEL_PATH = "model.tflite"           # Make sure this file exists in repo!
 IMAGE_SIZE = (224, 224)
 
 BREEDS = [
@@ -25,71 +23,66 @@ BREEDS = [
     "Amritmahal","Alambadi"
 ]
 
-# =============================
-# LOAD TFLITE MODEL
-# =============================
-print("Loading model...")
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
-
+# ==========================
+# LOAD MODEL ONCE
+# ==========================
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-print("Model loaded successfully!")
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 def preprocess(img):
     img = img.convert("RGB")
-    img = img.resize(IMAGE_SIZE)
+    img = img.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
     arr = np.array(img, dtype=np.float32)
-    arr = np.expand_dims(arr, axis=0)
-    return arr
+    # Remove the next line if your model was trained with /255.0
+    # arr = arr / 255.0
+    return np.expand_dims(arr, axis=0)
 
 @app.route("/predict", methods=["POST"])
-def predict_api():
+def predict():
     if "file" not in request.files:
-        return jsonify({"error": "No file part"}), 400
+        return jsonify({"error": "No file"}), 400
 
     file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
 
     try:
         img = Image.open(file.stream)
-    except Exception as e:
-        return jsonify({"error": "Invalid image file"}), 400
+    except:
+        return jsonify({"error": "Invalid image"}), 400
 
-    # Preprocess
+    # Run model
     input_data = preprocess(img)
     interpreter.set_tensor(input_details[0]["index"], input_data)
     interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]["index"])[0]
+    output = interpreter.get_tensor(output_details[0]["index"])[0]
 
-    # Get top 5 predictions
-    top5_idx = np.argsort(output_data)[-5:][::-1]
-    top5_conf = output_data[top5_idx]
-    top5_breeds = [BREEDS[i] for i in top5_idx]
-
-    # Format exactly like your Angular frontend expects
-    top_predictions = [
-        {"label": breed, "confidence": round(float(conf), 4)}
-        for breed, conf in zip(top5_breeds, top5_conf)
+    # Top 5
+    top5_idx = np.argsort(output)[-5:][::-1]
+    top5 = [
+        {
+            "label": BREEDS[i],
+            "confidence": round(float(output[i]), 4)   # 0.9821 format
+        }
+        for i in top5_idx
     ]
 
+    # Main result
+    main_breed = top5[0]["label"]
+    main_conf = round(top5[0]["confidence"] * 100, 2)
+
     return jsonify({
-        "top_predictions": top_predictions
-        # Optional: keep these for debugging
-        # "predicted_breed": top_predictions[0]["label"],
-        # "confidence": f"{top_predictions[0]['confidence']*100:.2f}%"
+        "breed": main_breed,
+        "confidence": main_conf,
+        "top_predictions": top5
     })
 
-# Health check
 @app.route("/")
 def home():
-    return "Cow Breed Classifier API is running!"
+    return "Cow Breed Classifier API – Ready!"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
