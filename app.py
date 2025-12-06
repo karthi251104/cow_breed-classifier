@@ -1,3 +1,4 @@
+# app.py (or main.py)
 import os
 import numpy as np
 from PIL import Image
@@ -10,8 +11,7 @@ from flask_cors import CORS
 # =============================
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-MODEL_PATH = "model.tflite"
+MODEL_PATH = "model.tflite"  # ← Make sure this matches your actual filename!
 IMAGE_SIZE = (224, 224)
 
 BREEDS = [
@@ -28,31 +28,19 @@ BREEDS = [
 # =============================
 # LOAD TFLITE MODEL
 # =============================
-print("Checking model file...")
-print("Model exists:", os.path.exists(MODEL_PATH))
-print("Full path:", os.path.abspath(MODEL_PATH))
-
+print("Loading model...")
 if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Model not found: {MODEL_PATH}")
+    raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
 
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-
 print("Model loaded successfully!")
 
-
-# =============================
-# FLASK APP
-# =============================
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-
-# =============================
-# PREPROCESS FUNCTION
-# =============================
 def preprocess(img):
     img = img.convert("RGB")
     img = img.resize(IMAGE_SIZE)
@@ -60,59 +48,49 @@ def preprocess(img):
     arr = np.expand_dims(arr, axis=0)
     return arr
 
-
-# =============================
-# PREDICT API
-# =============================
 @app.route("/predict", methods=["POST"])
 def predict_api():
-
-    print("FILES:", request.files)
-
     if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+        return jsonify({"error": "No file part"}), 400
 
     file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
 
     try:
         img = Image.open(file.stream)
-    except:
-        return jsonify({"error": "Invalid image"}), 400
+    except Exception as e:
+        return jsonify({"error": "Invalid image file"}), 400
 
-    arr = preprocess(img)
-
-    interpreter.set_tensor(input_details[0]["index"], arr)
+    # Preprocess
+    input_data = preprocess(img)
+    interpreter.set_tensor(input_details[0]["index"], input_data)
     interpreter.invoke()
+    output_data = interpreter.get_tensor(output_details[0]["index"])[0]
 
-    output = interpreter.get_tensor(output_details[0]["index"])[0]
+    # Get top 5 predictions
+    top5_idx = np.argsort(output_data)[-5:][::-1]
+    top5_conf = output_data[top5_idx]
+    top5_breeds = [BREEDS[i] for i in top5_idx]
 
-    print("Model output shape:", output.shape)
-    print("Model output:", output)
-
-    pred_index = int(np.argmax(output))
-    confidence = float(output[pred_index])
-
-    # VALIDATE CLASS COUNT
-    model_classes = len(output)
-    breed_classes = len(BREEDS)
-
-    if model_classes != breed_classes:
-        return jsonify({
-            "error": "Model output count does NOT match breed list!",
-            "model_classes": model_classes,
-            "breed_list_classes": breed_classes
-        }), 500
-
-    predicted_breed = BREEDS[pred_index]
+    # Format exactly like your Angular frontend expects
+    top_predictions = [
+        {"label": breed, "confidence": round(float(conf), 4)}
+        for breed, conf in zip(top5_breeds, top5_conf)
+    ]
 
     return jsonify({
-        "breed": predicted_breed,
-        "confidence": round(confidence * 100, 2)
+        "top_predictions": top_predictions
+        # Optional: keep these for debugging
+        # "predicted_breed": top_predictions[0]["label"],
+        # "confidence": f"{top_predictions[0]['confidence']*100:.2f}%"
     })
 
+# Health check
+@app.route("/")
+def home():
+    return "Cow Breed Classifier API is running!"
 
-# =============================
-# RUN SERVER LOCALLY
-# =============================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
