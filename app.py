@@ -1,14 +1,20 @@
-import gradio as gr
-import tensorflow as tf
+import os
 import numpy as np
 from PIL import Image
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import tensorflow as tf
 
-# -------------------- LOAD MODEL --------------------
+app = Flask(__name__)
+CORS(app)
+
+MODEL_PATH = "Best_Cattle_Breed.h5"
+IMAGE_SIZE = (224, 224)
+
 print("Loading model...")
-model = tf.keras.models.load_model("Best_Cattle_Breed.h5")
+model = tf.keras.models.load_model(MODEL_PATH)
 print("Model loaded successfully!")
 
-# ------------------ BREED CLASS NAMES ------------------
 CLASS_NAMES = [
     "Umblachery", "Tharparkar", "Toda", "Sahiwal", "Surti", "Red_Dane",
     "Rathi", "Pulikulam", "Ongole", "Nimari", "Nagpuri", "Nili_Ravi",
@@ -20,39 +26,49 @@ CLASS_NAMES = [
     "Alambadi"
 ]
 
-IMAGE_SIZE = (224, 224)
-
-# -------------------- PREPROCESS IMAGE --------------------
-def preprocess(img):
+def preprocess_image(img):
     img = img.convert("RGB")
     img = img.resize(IMAGE_SIZE)
     arr = np.array(img, dtype=np.float32)
-
     arr = tf.keras.applications.efficientnet_v2.preprocess_input(arr)
-    arr = np.expand_dims(arr, axis=0)
-    return arr
+    return np.expand_dims(arr, axis=0)
 
-# -------------------- PREDICT FUNCTION --------------------
-def predict_cow(img):
-    arr = preprocess(img)
+@app.route("/")
+def home():
+    return jsonify({"status": "API running"}), 200
+
+# 🟢 SUPPORTS BOTH: image AND generic file upload
+@app.route("/predict", methods=["POST"])
+def predict_api():
+    # Check for both keys: image OR file
+    file = None
+
+    if "image" in request.files:
+        file = request.files["image"]
+    elif "file" in request.files:
+        file = request.files["file"]
+    else:
+        return jsonify({"error": "No image/file provided"}), 400
+
+    # Check empty file
+    if file.filename == "":
+        return jsonify({"error": "Empty file"}), 400
+
+    # Try opening file as image
+    try:
+        img = Image.open(file.stream)
+    except Exception as e:
+        return jsonify({"error": "Uploaded file is not an image"}), 400
+
+    arr = preprocess_image(img)
     preds = model.predict(arr)
     idx = int(np.argmax(preds))
     confidence = float(np.max(preds))
-    
-    breed = CLASS_NAMES[idx] if idx < len(CLASS_NAMES) else "Unknown"
 
-    return {
-        "breed": breed,
-        "confidence": round(confidence, 4)
-    }
+    return jsonify({
+        "breed": CLASS_NAMES[idx],
+        "confidence": confidence
+    })
 
-# -------------------- GRADIO INTERFACE --------------------
-demo = gr.Interface(
-    fn=predict_cow,
-    inputs=gr.Image(type="pil"),
-    outputs="json",
-    title="Indian Cow Breed Classifier",
-    description="Upload a cow image to get breed prediction and confidence.",
-)
-
-demo.launch()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

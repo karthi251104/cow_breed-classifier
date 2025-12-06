@@ -1,5 +1,7 @@
-gradio
-tensorflow
+flask
+flask-cors
+tensorflow==2.12.0
 numpy
 pillow
+gunicorn
 
