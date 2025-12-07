@@ -1,13 +1,17 @@
-from flask import Flask, request, jsonify
-import tensorflow as tf
 import numpy as np
 from PIL import Image
+import tensorflow as tf
+import os
+
+# ---------------- DEBUG: SHOW FILES ----------------
+print("Current directory:", os.getcwd())
+print("Files in folder:", os.listdir())
 
 # ---------------- SETTINGS ----------------
-MODEL_PATH = "model.tflite"   # your TFLite model file
+MODEL_PATH = "model.tflite"   # YOUR TFLITE MODEL NAME
 IMAGE_SIZE = (224, 224)
 
-# ---------------- CLASS NAMES ----------------
+# ---------------- CLASS NAMES (YOUR TRAINING ORDER) ----------------
 CLASS_NAMES = [
     "Alambadi",
     "Amritmahal",
@@ -53,10 +57,44 @@ CLASS_NAMES = [
 ]
 
 # ---------------- LOAD TFLITE MODEL ----------------
-print("Loading TFLite model...")
+print("\nLoading TFLite model...")
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
-print("✔ TFLite model loaded successfully!")
+print("✔ Model loaded!\n")
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
+
+# ---------------- IMAGE PREPROCESSING ----------------
+def preprocess_image(image_path):
+    img = Image.open(image_path).convert("RGB")
+    img = img.resize(IMAGE_SIZE)
+
+    img = np.array(img, dtype=np.float32)
+    img = tf.keras.applications.efficientnet_v2.preprocess_input(img)
+    img = np.expand_dims(img, axis=0)
+
+    return img
+
+# ---------------- PREDICTION FUNCTION ----------------
+def predict_image(image_path):
+    img = preprocess_image(image_path)
+
+    interpreter.set_tensor(input_details[0]['index'], img)
+    interpreter.invoke()
+
+    preds = interpreter.get_tensor(output_details[0]['index'])[0]
+    idx = int(np.argmax(preds))
+    confidence = float(np.max(preds))
+
+    return CLASS_NAMES[idx], confidence
+
+# ---------------- TEST IMAGE PATH ----------------
+TEST_IMAGE = r"C:\Users\karthikarthika\Downloads\images.jpg"
+
+breed, conf = predict_image(TEST_IMAGE)
+
+print("========= PREDICTION RESULT =========")
+print("Breed:", breed)
+print("Confidence:", conf)
+print("=====================================")

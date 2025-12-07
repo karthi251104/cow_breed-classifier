@@ -54,10 +54,14 @@ Vechur
 
 print("✔ Loaded class names:", CLASS_NAMES)
 
-# ---------------- LOAD MODEL ----------------
-print("Loading model...")
-model = tf.keras.models.load_model(MODEL_PATH)
-print("✔ Model loaded successfully!")
+# ---------------- LOAD TFLITE MODEL ----------------
+print("Loading TFLite model...")
+interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
+print("✔ TFLite model loaded successfully!")
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 # ---------------- IMAGE PREPROCESSING ----------------
 def preprocess_image(image):
@@ -71,7 +75,11 @@ def preprocess_image(image):
 # ---------------- PREDICT FUNCTION ----------------
 def predict_breed(image):
     arr = preprocess_image(image)
-    preds = model.predict(arr)
+
+    interpreter.set_tensor(input_details[0]['index'], arr)
+    interpreter.invoke()
+
+    preds = interpreter.get_tensor(output_details[0]['index'])[0]
     idx = int(np.argmax(preds))
     confidence = float(np.max(preds))
     return CLASS_NAMES[idx], confidence
@@ -99,7 +107,7 @@ def predict():
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "Cow Breed Classifier API Running!"})
+    return jsonify({"message": "Cow Breed TFLite API Running!"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
