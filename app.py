@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import tensorflow as tf
 import numpy as np
 from PIL import Image
@@ -9,71 +10,121 @@ MODEL_PATH = "model.tflite"
 IMAGE_SIZE = (224, 224)
 
 # ---------------- CLASS NAMES ----------------
-CLASS_NAMES = [...]
-# (keep your full list unchanged)
+CLASS_NAMES = """
+Alambadi
+Amritmahal
+Ayrshire
+Banni
+Bargur
+Bhadawari
+Brown_Swiss
+Dangi
+Deoni
+Gir
+Guernsey
+Hallikar
+Hariana
+Holstein_Friesian
+Jaffrabadi
+Jersey
+Kangayam
+Kankrej
+Kasargod
+Kenkatha
+Kherigarh
+Khillari
+Krishna_Valley
+Malnad_gidda
+Mehsana
+Murrah
+Nagori
+Nagpuri
+Nili_Ravi
+Nimari
+Ongole
+Pulikulam
+Rathi
+Red_Dane
+Red_Sindhi
+Sahiwal
+Surti
+Tharparkar
+Toda
+Umblachery
+Vechur
+""".strip().split("\n")
 
-# ---------------- LOAD TFLITE MODEL (with better error handling) ----------------
-print("Loading TFLite model from:", MODEL_PATH)
+# ---------------- LOAD MODEL ----------------
+print("Loading TFLite model...")
 if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Model not found at {MODEL_PATH}! Did you forget to add it to Git?")
+    raise FileNotFoundError("model.tflite missing in project root!")
 
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
-print("✔ TFLite model loaded successfully!")
+print("✔ TFLite model loaded")
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# ---------------- IMAGE PREPROCESSING ----------------
-def preprocess_image(image):
-    image = image.convert("RGB")
-    image = image.resize(IMAGE_SIZE)
-    arr = np.array(image, dtype=np.float32)
+# ---------------- PREPROCESS ----------------
+def preprocess_image(img):
+    img = img.convert("RGB")
+    img = img.resize(IMAGE_SIZE)
+    arr = np.array(img, dtype=np.float32)
     arr = tf.keras.applications.efficientnet_v2.preprocess_input(arr)
     arr = np.expand_dims(arr, axis=0)
     return arr
 
-# ---------------- PREDICTION FUNCTION ----------------
-def predict_breed(image):
-    arr = preprocess_image(image)
-    interpreter.set_tensor(input_details[0]['index'], arr)
+# ---------------- PREDICT ----------------
+def predict_breed(img):
+    arr = preprocess_image(img)
+    interpreter.set_tensor(input_details[0]["index"], arr)
     interpreter.invoke()
-    preds = interpreter.get_tensor(output_details[0]['index'])[0]
+    preds = interpreter.get_tensor(output_details[0]["index"])[0]
+
     idx = int(np.argmax(preds))
-    confidence = float(np.max(preds))
-    return CLASS_NAMES[idx], confidence
+    conf = float(np.max(preds))
+
+    return CLASS_NAMES[idx], conf
 
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
+CORS(app)
 
-# HEALTH CHECK ENDPOINT (this is the key fix!)
-@app.route("/health")
-def health():
-    return "OK", 200  # Plain text, 200 status → Render loves this
-
-# Optional: keep your nice JSON root if you want
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "Cow Breed TFLite API Running!", "health": "OK"})
 
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+# FIX: allow GET to show instructions (avoid 405)
+@app.route("/predict", methods=["GET"])
+def predict_info():
+    return jsonify({
+        "message": "Use POST with form-data: image=<file>",
+        "example": "/predict (POST)"
+    })
+
 @app.route("/predict", methods=["POST"])
 def predict():
     if "image" not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
+        return jsonify({"error": "No image file uploaded"}), 400
+
     file = request.files["image"]
     try:
         img = Image.open(file.stream)
-    except Exception as e:
-        return jsonify({"error": "Invalid image"}), 400
-    
-    breed, confidence = predict_breed(img)
+    except:
+        return jsonify({"error": "Invalid image file"}), 400
+
+    breed, conf = predict_breed(img)
     return jsonify({
         "breed": breed,
-        "confidence": round(confidence, 4)
+        "confidence": round(conf, 4)
     })
 
-# ---------------- RUN APP ----------------
+# ---------------- RUN (Render PORT) ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    # Debug off in production for speed + security
     app.run(host="0.0.0.0", port=port, debug=False)
