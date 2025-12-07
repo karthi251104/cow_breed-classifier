@@ -2,12 +2,13 @@ from flask import Flask, request, jsonify
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+import os
 
 # ---------------- SETTINGS ----------------
 MODEL_PATH = "model.tflite"
 IMAGE_SIZE = (224, 224)
 
-# ---------------- CLASS NAMES (EMBEDDED AS TEXT) ----------------
+# ---------------- CLASS NAMES ----------------
 CLASS_NAMES = """
 Alambadi
 Amritmahal
@@ -72,7 +73,7 @@ def preprocess_image(image):
     arr = np.expand_dims(arr, axis=0)
     return arr
 
-# ---------------- PREDICT FUNCTION ----------------
+# ---------------- PREDICTION FUNCTION ----------------
 def predict_breed(image):
     arr = preprocess_image(image)
 
@@ -82,10 +83,15 @@ def predict_breed(image):
     preds = interpreter.get_tensor(output_details[0]['index'])[0]
     idx = int(np.argmax(preds))
     confidence = float(np.max(preds))
+
     return CLASS_NAMES[idx], confidence
 
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "Cow Breed TFLite API Running!"})
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -105,9 +111,7 @@ def predict():
         "confidence": confidence
     })
 
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"message": "Cow Breed TFLite API Running!"})
-
+# ---------------- RUN APP (RENDER COMPATIBLE PORT) ----------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 10000))  # Render injects this variable
+    app.run(host="0.0.0.0", port=port)
