@@ -9,54 +9,14 @@ MODEL_PATH = "model.tflite"
 IMAGE_SIZE = (224, 224)
 
 # ---------------- CLASS NAMES ----------------
-CLASS_NAMES = """
-Alambadi
-Amritmahal
-Ayrshire
-Banni
-Bargur
-Bhadawari
-Brown_Swiss
-Dangi
-Deoni
-Gir
-Guernsey
-Hallikar
-Hariana
-Holstein_Friesian
-Jaffrabadi
-Jersey
-Kangayam
-Kankrej
-Kasargod
-Kenkatha
-Kherigarh
-Khillari
-Krishna_Valley
-Malnad_gidda
-Mehsana
-Murrah
-Nagori
-Nagpuri
-Nili_Ravi
-Nimari
-Ongole
-Pulikulam
-Rathi
-Red_Dane
-Red_Sindhi
-Sahiwal
-Surti
-Tharparkar
-Toda
-Umblachery
-Vechur
-""".strip().split("\n")
+CLASS_NAMES = [...]
+# (keep your full list unchanged)
 
-print("✔ Loaded class names:", CLASS_NAMES)
+# ---------------- LOAD TFLITE MODEL (with better error handling) ----------------
+print("Loading TFLite model from:", MODEL_PATH)
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(f"Model not found at {MODEL_PATH}! Did you forget to add it to Git?")
 
-# ---------------- LOAD TFLITE MODEL ----------------
-print("Loading TFLite model...")
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 print("✔ TFLite model loaded successfully!")
@@ -76,42 +36,44 @@ def preprocess_image(image):
 # ---------------- PREDICTION FUNCTION ----------------
 def predict_breed(image):
     arr = preprocess_image(image)
-
     interpreter.set_tensor(input_details[0]['index'], arr)
     interpreter.invoke()
-
     preds = interpreter.get_tensor(output_details[0]['index'])[0]
     idx = int(np.argmax(preds))
     confidence = float(np.max(preds))
-
     return CLASS_NAMES[idx], confidence
 
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
 
+# HEALTH CHECK ENDPOINT (this is the key fix!)
+@app.route("/health")
+def health():
+    return "OK", 200  # Plain text, 200 status → Render loves this
+
+# Optional: keep your nice JSON root if you want
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "Cow Breed TFLite API Running!"})
+    return jsonify({"message": "Cow Breed TFLite API Running!", "health": "OK"})
 
 @app.route("/predict", methods=["POST"])
 def predict():
     if "image" not in request.files:
         return jsonify({"error": "No image uploaded"}), 400
-
     file = request.files["image"]
     try:
         img = Image.open(file.stream)
-    except:
+    except Exception as e:
         return jsonify({"error": "Invalid image"}), 400
-
+    
     breed, confidence = predict_breed(img)
-
     return jsonify({
         "breed": breed,
-        "confidence": confidence
+        "confidence": round(confidence, 4)
     })
 
-# ---------------- RUN APP (RENDER COMPATIBLE PORT) ----------------
+# ---------------- RUN APP ----------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render injects this variable
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 10000))
+    # Debug off in production for speed + security
+    app.run(host="0.0.0.0", port=port, debug=False)
