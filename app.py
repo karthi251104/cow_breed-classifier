@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import tensorflow as tf
 import numpy as np
 from PIL import Image
@@ -54,77 +53,73 @@ Umblachery
 Vechur
 """.strip().split("\n")
 
+print("✔ Loaded class names:", CLASS_NAMES)
+
 # ---------------- LOAD MODEL ----------------
-print("Loading TFLite model...")
+print("Loading TFLite model from:", MODEL_PATH)
+
 if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError("model.tflite missing in project root!")
+    raise FileNotFoundError("❌ model.tflite NOT FOUND in Render deployment!")
 
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
-print("✔ TFLite model loaded")
+print("✔ TFLite model loaded!")
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# ---------------- PREPROCESS ----------------
-def preprocess_image(img):
-    img = img.convert("RGB")
-    img = img.resize(IMAGE_SIZE)
-    arr = np.array(img, dtype=np.float32)
+# ---------------- IMAGE PREPROCESSING ----------------
+def preprocess_image(image):
+    image = image.convert("RGB")
+    image = image.resize(IMAGE_SIZE)
+    arr = np.array(image, dtype=np.float32)
     arr = tf.keras.applications.efficientnet_v2.preprocess_input(arr)
     arr = np.expand_dims(arr, axis=0)
     return arr
 
-# ---------------- PREDICT ----------------
-def predict_breed(img):
-    arr = preprocess_image(img)
-    interpreter.set_tensor(input_details[0]["index"], arr)
+# ---------------- PREDICT FUNCTION ----------------
+def predict_breed(image):
+    arr = preprocess_image(image)
+
+    interpreter.set_tensor(input_details[0]['index'], arr)
     interpreter.invoke()
-    preds = interpreter.get_tensor(output_details[0]["index"])[0]
 
+    preds = interpreter.get_tensor(output_details[0]['index'])[0]
     idx = int(np.argmax(preds))
-    conf = float(np.max(preds))
+    confidence = float(np.max(preds))
 
-    return CLASS_NAMES[idx], conf
+    return CLASS_NAMES[idx], confidence
 
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
-CORS(app)
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "Cow Breed TFLite API Running!", "health": "OK"})
+    return jsonify({"message": "Cow Breed Classifier API Running!"})
 
-@app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
 
-# FIX: allow GET to show instructions (avoid 405)
-@app.route("/predict", methods=["GET"])
-def predict_info():
-    return jsonify({
-        "message": "Use POST with form-data: image=<file>",
-        "example": "/predict (POST)"
-    })
-
+# 🚨 ONLY POST ALLOWED HERE
 @app.route("/predict", methods=["POST"])
 def predict():
     if "image" not in request.files:
-        return jsonify({"error": "No image file uploaded"}), 400
+        return jsonify({"error": "No image uploaded"}), 400
 
     file = request.files["image"]
+
     try:
         img = Image.open(file.stream)
     except:
-        return jsonify({"error": "Invalid image file"}), 400
+        return jsonify({"error": "Invalid image"}), 400
 
-    breed, conf = predict_breed(img)
+    breed, confidence = predict_breed(img)
+
     return jsonify({
         "breed": breed,
-        "confidence": round(conf, 4)
+        "confidence": round(confidence, 4)
     })
 
-# ---------------- RUN (Render PORT) ----------------
+
+# ---------------- START SERVER ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
